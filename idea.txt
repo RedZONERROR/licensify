@@ -1,0 +1,165 @@
+> You are a **senior Laravel architect & security-aware full-stack engineer**. Build a **Laravel 11** application using **Blade + Alpine.js + TailwindCSS** with **AJAX** interactivity (no React/Vue). The app must be **production-ready**, run locally at `http://localhost:8000` (or `http://localhost`), be **deployable on cPanel with HTTPS**, and follow a **strict step-by-step, test-first process**:
+>
+> * All work must be written as discrete steps: `Step 1.1`, `Step 1.2`, `Step 1.3`, etc.
+> * After each step include automated tests (PHPUnit / HTTP tests). Fix failures before moving on.
+> * Never add duplicate/garbage functions — update/refactor existing code when possible.
+> * Keep code modular, well-documented, and professional. Commit-style summaries required after each step.
+>
+> ---
+>
+> ## 0. Must-run-locally & demo
+>
+> * The repo must include a quick-start that boots on local dev: `composer install`, `.env.example`, `php artisan key:generate`, `php artisan migrate --seed`, `php artisan serve`.
+> * Provide Postman/HTTP examples for key endpoints (login, license validate, backup trigger).
+>
+> ---
+>
+> ## 1. Core features (functional)
+>
+> 1.1 **Roles & Access**
+>
+> * Roles: `admin`, `developer`, `reseller`, `user`. (Add `developer` role with elevated operational permissions.)
+> * RBAC enforced via middleware + policies. 2FA required for `admin` & `developer` actions like backup/restore and API key rotation.
+>
+> 1.2 **Authentication**
+>
+> * Email/password (Argon2id/Bcrypt).
+> * **Gmail OAuth** via Laravel Socialite. After Gmail OAuth: allow optional “extra password” set by user; support login via Gmail-only or Gmail+password.
+> * Session id regeneration on login, secure cookies, CSRF for all forms/AJAX.
+>
+> 1.3 **User Profile & Privacy**
+>
+> * Profile: `name`, `email`, `password` (nullable), `avatar`, `2fa_enabled`, `privacy_policy_accepted_at`, `developer_notes` (for developer role).
+> * Privacy-policy modal shown on first login; consent tracked. Include a link to export / erase personal data (GDPR-like).
+>
+> 1.4 **License Manager**
+>
+> * Admin/Reseller can: generate, suspend/unsuspend, reset device bindings, expire, delete.
+> * License fields: `id`, `product_id`, `owner_id`, `user_id`, `license_key` (UUID or signed), `status` (`active`, `expired`, `suspended`, `reset`), `device_type`, `max_devices`, `expires_at`, plus `deleted_at`.
+> * Device bindings tracked in `license_activations`.
+> * `/api/license/validate` endpoint requires JWT or API key + HMAC (nonce + timestamp). Rate-limited & logged.
+>
+> 1.5 **Reseller & User Management**
+>
+> * Admin creates resellers, sets quotas (max users, licenses). Reseller manages their own users.
+> * Dashboard widgets via AJAX.
+>
+> 1.6 **Chat (AJAX poll)**
+>
+> * Private chat: User ↔ Reseller ↔ Admin. AJAX polling default (5s).
+> * `ChatMessage(sender_id, receiver_id, body, metadata, created_at)`. Block, slow-mode, per-user rate-limit.
+>
+> 1.7 **Payments & Webhooks (optional)**
+>
+> * Stripe/PayPal/Razorpay webhook endpoints to credit wallets and activate/extend licenses. Webhooks verified & idempotent.
+>
+> 1.8 **Forgot Password & Account Recovery**
+>
+> * Password reset with signed time-limited tokens (Laravel). Rate-limit attempts, email alerts on suspicious resets. Optional TOTP on reset confirm. Account lockout on repeated failures.
+>
+> ---
+>
+> ## 2. Developer & Operational Tools (new additions)
+>
+> 2.1 **Developer Role & Safety**
+>
+> * `developer` role: privileged operational tasks (backup/restore trigger, DB export, view logs, rotate API keys). Actions audited in `activity_logs` & `audit_logs`. Require 2FA and IP allowlist option for `developer` and `admin`.
+>
+> 2.2 **Site Settings (Admin Deck / Panel)**
+>
+> * Admin UI panel (Settings → General / Email / Storage / Integrations / DevOps) to manage:
+>
+>   * Site title, domain, production URL.
+>   * SMTP settings (host, port, encryption, user, from email) with send-test-email button.
+>   * Telegram Bot token + chat id and test-send button.
+>   * S3 (Access Key, Secret, Bucket, Region) / S3-compatible settings and test-upload.
+>   * API Key template & rotation UI (generate, revoke, set scopes, last-used).
+>   * Backup settings: schedule (cron-like), retention, encryption passphrase (stored encrypted), offsite target (S3 or FTP).
+>   * Webhook URLs for payment providers.
+> * Every change to settings must be audited and require confirmation; sensitive fields hidden in UI (masked) and stored encrypted.
+>
+> 2.3 **Backup & Restore**
+>
+> * Manual backup: developer/admin can trigger full DB dump + optionally files (uploads) → generate encrypted archive (AES-256) → store to configured offsite (S3/FTP) and allow secure download.
+> * Scheduled backups: cron task that follows settings (daily/hourly) and retention policy.
+> * Restore: restricted to `developer` + `admin` with 2FA; must run with confirmation, show pre-checks (free disk space, compatible schema) and create pre-restore backup snapshot.
+> * Backup logs: who triggered, size, link, checksum, status, retention expiry.
+> * Backup endpoint secured and idempotent. Provide CLI commands (artisan) to trigger/test backups locally & in staging.
+>
+> 2.4 **SMTP / Telegram / Bot / Tokens**
+>
+> * Site Settings panel to edit SMTP and Telegram bot token.
+> * Provide "send test" actions and record last test result/time.
+> * Allow rotating tokens and require revalidation.
+>
+> 2.5 **Developer Dashboard**
+>
+> * Developer-only view: system health (disk, DB size, last backup), queue status, pending migrations, error rate.
+> * "Audit trail" viewer for settings & critical actions.
+> * Ability to export full audit logs as CSV for compliance.
+>
+> ---
+>
+> ## 3. Security & Monitoring (must)
+>
+> * Sanctum for browser sessions; JWT for external API clients (or API key + HMAC). Document choice & rotation process.
+> * CSRF, CSP, X-Frame, X-Content-Type headers.
+> * API key storage: hashed; provide rotate/revoke UI.
+> * Rate limiting (login, password reset, license validate).
+> * Session management: regen on login, absolute expiry, idle timeout, detect concurrent sessions; ability to force-logout.
+> * Encrypt backups; ensure secrets stored in `.env` and not in repo.
+> * Error reporting (Sentry) & metrics (Prometheus / hosted).
+> * Pen-test checklist & automated OWASP scans included in repo scripts.
+>
+> ---
+>
+> ## 4. Data & DB (migrations + indexes)
+>
+> * Provide migrations for: `users`, `roles`, `licenses`, `license_activations`, `chat_messages`, `transactions`, `payments`, `api_clients`, `activity_logs`, `audit_logs`, `settings`, `backups`.
+> * Add proper indexes (license\_key, owner\_id, expires\_at, device\_hash). Soft deletes enabled.
+> * Seeder: 1 admin (with 2FA seed code), 1 developer, 1 reseller, 1 Gmail user, 1 product, 1 license.
+>
+> ---
+>
+> ## 5. API & Endpoints (examples)
+>
+> * `POST /api/license/validate` → requires `X-API-KEY` + `X-SIGNATURE` (HMAC of payload) or JWT Authorization. Validate nonce & timestamp, check rate limit, log result.
+> * `POST /api/backups/trigger` → developer-only, triggers backup.
+> * `GET /api/admin/settings` / `POST /api/admin/settings` → manage site settings (sensitive values encrypted).
+> * `POST /api/webhook/payment` → verified webhook handler.
+>
+> ---
+>
+> ## 6. Tests & CI (test-first)
+>
+> * Unit & integration tests for: auth flows (Gmail + extra-password), license generation/validate/reset/suspend, backup trigger & listing, settings change audit, role enforcement.
+> * Include security tests (token expiry, rate-limits enforced).
+> * CI pipeline (GitHub Actions sample) that runs tests and basic security scanner.
+>
+> ---
+>
+> ## 7. Docs & Handoff
+>
+> * README with local setup + `php artisan serve` instructions and sample `.env`.
+> * cPanel deployment guide (Let’s Encrypt setup, file permissions, cron for backups).
+> * API docs (OpenAPI/Swagger) for `license/validate`, backup endpoints, webhook.
+> * Admin manual: how to rotate API keys, rotate JWT secrets, trigger restore, test SMTP/Telegram.
+> * Pen-test and security-checklist with remediation steps.
+>
+> ---
+>
+> ## 8. Workflow rules for the AI developer
+>
+> * Always produce numbered steps (`Step 1.1`) with tests to pass.
+> * Provide commit-like summary after each step with test output.
+> * Don’t write duplicate functions — refactor/update existing code.
+> * If a failing test exists, stop and fix it before next step.
+> * Provide small, reviewable PR-style changes per step.
+>
+> ---
+>
+> ### Final Deliverable
+>
+> A **complete repo** that runs on `http://localhost` (dev) and is deployable to cPanel with HTTPS that includes: Gmail login + optional extra password, full user profile, privacy policy modal/consent, license manager, reseller system, AJAX chat, developer tools (backup/restore, settings panel for SMTP/Telegram/S3/API keys), audits & logs, tests, CI config, and deployment docs.
+>
+> Build with security-first mindset and minimal dependencies. If any trade-offs are required for shared hosting, document them and provide next-step upgrades (self-hosted websocket or Pusher, managed DB replicas, etc.).
