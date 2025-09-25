@@ -67,6 +67,76 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
     Route::post('/roles/bulk-update', [App\Http\Controllers\Admin\RoleManagementController::class, 'bulkUpdate'])->name('roles.bulk-update');
     Route::get('/roles-permissions', [App\Http\Controllers\Admin\RoleManagementController::class, 'permissions'])->name('roles.permissions');
     Route::get('/roles-export', [App\Http\Controllers\Admin\RoleManagementController::class, 'export'])->name('roles.export');
+    
+    // Reseller Management
+    Route::resource('resellers', App\Http\Controllers\Admin\ResellerController::class);
+    Route::get('/resellers/{reseller}/users', [App\Http\Controllers\Admin\ResellerController::class, 'users'])->name('resellers.users');
+    Route::get('/resellers/{reseller}/licenses', [App\Http\Controllers\Admin\ResellerController::class, 'licenses'])->name('resellers.licenses');
+    Route::post('/resellers/{reseller}/assign-user', [App\Http\Controllers\Admin\ResellerController::class, 'assignUser'])->name('resellers.assign-user');
+    Route::delete('/resellers/{reseller}/users/{user}', [App\Http\Controllers\Admin\ResellerController::class, 'removeUser'])->name('resellers.remove-user');
+    Route::get('/available-users', [App\Http\Controllers\Admin\ResellerController::class, 'availableUsers'])->name('resellers.available-users');
+    Route::post('/resellers/{reseller}/update-counts', [App\Http\Controllers\Admin\ResellerController::class, 'updateCounts'])->name('resellers.update-counts');
+    Route::get('/reseller-statistics', [App\Http\Controllers\Admin\ResellerController::class, 'statistics'])->name('resellers.statistics');
+});
+
+// Admin and Developer payment management routes
+Route::middleware(['auth', 'role:admin,developer'])->prefix('admin')->name('admin.')->group(function () {
+    // Payment Management
+    Route::get('/payments', [App\Http\Controllers\Admin\PaymentController::class, 'index'])->name('payments.index');
+    Route::get('/payments/{transaction}', [App\Http\Controllers\Admin\PaymentController::class, 'show'])->name('payments.show');
+    Route::get('/payments-statistics', [App\Http\Controllers\Admin\PaymentController::class, 'statistics'])->name('payments.statistics');
+    Route::get('/payments-export', [App\Http\Controllers\Admin\PaymentController::class, 'export'])->name('payments.export');
+    
+    // Wallet Management
+    Route::get('/wallets', [App\Http\Controllers\Admin\PaymentController::class, 'wallets'])->name('wallets.index');
+    Route::get('/wallets/{wallet}', [App\Http\Controllers\Admin\PaymentController::class, 'showWallet'])->name('wallets.show');
+    Route::post('/wallets/credit', [App\Http\Controllers\Admin\PaymentController::class, 'creditWallet'])->name('wallets.credit');
+    Route::post('/wallets/debit', [App\Http\Controllers\Admin\PaymentController::class, 'debitWallet'])->name('wallets.debit');
+    Route::get('/users/search', [App\Http\Controllers\Admin\PaymentController::class, 'searchUsers'])->name('users.search');
+    Route::get('/users/{user}/wallet', [App\Http\Controllers\Admin\PaymentController::class, 'getUserWallet'])->name('users.wallet');
+    
+    // Refund Management
+    Route::post('/payments/{transaction}/refund', [App\Http\Controllers\Admin\PaymentController::class, 'refund'])->name('payments.refund');
+});
+
+// Reseller Dashboard routes
+Route::middleware(['auth', 'role:reseller'])->prefix('reseller')->name('reseller.')->group(function () {
+    Route::get('/dashboard', [App\Http\Controllers\ResellerDashboardController::class, 'index'])->name('dashboard');
+    
+    // User Management
+    Route::get('/users', [App\Http\Controllers\ResellerDashboardController::class, 'users'])->name('users');
+    Route::get('/users/create', [App\Http\Controllers\ResellerDashboardController::class, 'createUser'])->name('users.create');
+    Route::post('/users', [App\Http\Controllers\ResellerDashboardController::class, 'storeUser'])->name('users.store');
+    Route::get('/users/{user}', [App\Http\Controllers\ResellerDashboardController::class, 'showUser'])->name('users.show');
+    Route::get('/users/{user}/edit', [App\Http\Controllers\ResellerDashboardController::class, 'editUser'])->name('users.edit');
+    Route::put('/users/{user}', [App\Http\Controllers\ResellerDashboardController::class, 'updateUser'])->name('users.update');
+    Route::delete('/users/{user}', [App\Http\Controllers\ResellerDashboardController::class, 'removeUser'])->name('users.remove');
+    
+    // License Management
+    Route::get('/licenses', [App\Http\Controllers\ResellerDashboardController::class, 'licenses'])->name('licenses');
+    
+    // API endpoints for AJAX
+    Route::get('/statistics', [App\Http\Controllers\ResellerDashboardController::class, 'statistics'])->name('statistics');
+    Route::get('/quota-info', [App\Http\Controllers\ResellerDashboardController::class, 'quotaInfo'])->name('quota-info');
+    Route::get('/recent-activity', [App\Http\Controllers\ResellerDashboardController::class, 'recentActivity'])->name('recent-activity');
+});
+
+// Chat routes
+Route::middleware(['auth', 'session.security'])->prefix('chat')->name('chat.')->group(function () {
+    Route::get('/', [App\Http\Controllers\ChatController::class, 'index'])->name('index');
+    Route::get('/messages/{user}', [App\Http\Controllers\ChatController::class, 'getMessages'])->name('messages');
+    Route::post('/send/{user}', [App\Http\Controllers\ChatController::class, 'sendMessage'])->name('send');
+    Route::post('/mark-read/{user}', [App\Http\Controllers\ChatController::class, 'markAsRead'])->name('mark-read');
+    Route::get('/unread-counts', [App\Http\Controllers\ChatController::class, 'getUnreadCounts'])->name('unread-counts');
+    Route::get('/history/{user}', [App\Http\Controllers\ChatController::class, 'getConversationHistory'])->name('history');
+    
+    // Moderation routes (Admin/Developer only)
+    Route::middleware('role:admin,developer')->group(function () {
+        Route::post('/enable-slow-mode/{user}', [App\Http\Controllers\ChatController::class, 'enableSlowMode'])->name('enable-slow-mode');
+        Route::post('/disable-slow-mode/{user}', [App\Http\Controllers\ChatController::class, 'disableSlowMode'])->name('disable-slow-mode');
+        Route::post('/block/{user}', [App\Http\Controllers\ChatController::class, 'blockUser'])->name('block');
+        Route::post('/unblock/{user}', [App\Http\Controllers\ChatController::class, 'unblockUser'])->name('unblock');
+    });
 });
 
 // Test routes for role and permission middleware
@@ -83,5 +153,7 @@ Route::middleware(['auth'])->group(function () {
         return response('Permission granted');
     })->middleware('permission:manage_users');
 });
+
+
 
 require __DIR__.'/auth.php';

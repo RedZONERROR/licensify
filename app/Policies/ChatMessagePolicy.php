@@ -13,7 +13,7 @@ class ChatMessagePolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->hasPermission('chat_access');
+        return true; // All authenticated users can access chat
     }
 
     /**
@@ -21,10 +21,14 @@ class ChatMessagePolicy
      */
     public function view(User $user, ChatMessage $chatMessage): bool
     {
+        // Admins and developers can view all messages for moderation
+        if ($user->isAdmin() || $user->isDeveloper()) {
+            return true;
+        }
+
         // Users can view messages they sent or received
         return $chatMessage->sender_id === $user->id || 
-               $chatMessage->receiver_id === $user->id ||
-               $user->hasRole(Role::ADMIN); // Admins can view all messages for moderation
+               $chatMessage->receiver_id === $user->id;
     }
 
     /**
@@ -32,7 +36,7 @@ class ChatMessagePolicy
      */
     public function create(User $user): bool
     {
-        return $user->hasPermission('chat_access');
+        return true; // All authenticated users can create messages
     }
 
     /**
@@ -40,6 +44,16 @@ class ChatMessagePolicy
      */
     public function update(User $user, ChatMessage $chatMessage): bool
     {
+        // Admins and developers can update any message
+        if ($user->isAdmin() || $user->isDeveloper()) {
+            return true;
+        }
+
+        // System messages can only be updated by admins/developers
+        if ($chatMessage->isSystemMessage()) {
+            return false;
+        }
+
         // Users can only edit their own messages within a time limit
         if ($chatMessage->sender_id !== $user->id) {
             return false;
@@ -54,13 +68,23 @@ class ChatMessagePolicy
      */
     public function delete(User $user, ChatMessage $chatMessage): bool
     {
-        // Users can delete their own messages
-        if ($chatMessage->sender_id === $user->id) {
+        // Admins and developers can delete any message for moderation
+        if ($user->isAdmin() || $user->isDeveloper()) {
             return true;
         }
 
-        // Admins can delete any message for moderation
-        return $user->hasRole(Role::ADMIN);
+        // System messages can only be deleted by admins/developers
+        if ($chatMessage->isSystemMessage()) {
+            return false;
+        }
+
+        // Users can delete their own messages within a time limit
+        if ($chatMessage->sender_id === $user->id) {
+            // Allow deletion within 5 minutes of sending
+            return $chatMessage->created_at->diffInMinutes(now()) <= 5;
+        }
+
+        return false;
     }
 
     /**
@@ -86,23 +110,18 @@ class ChatMessagePolicy
      */
     public function sendTo(User $user, User $recipient): bool
     {
-        // Must have chat access
-        if (!$user->hasPermission('chat_access')) {
-            return false;
-        }
-
         // Users can message their reseller
-        if ($user->hasRole(Role::USER) && $recipient->id === $user->reseller_id) {
+        if ($user->isUser() && $recipient->id === $user->reseller_id) {
             return true;
         }
 
         // Resellers can message their assigned users and admins
-        if ($user->hasRole(Role::RESELLER)) {
-            return $recipient->reseller_id === $user->id || $recipient->hasRole(Role::ADMIN);
+        if ($user->isReseller()) {
+            return $recipient->reseller_id === $user->id || $recipient->isAdmin();
         }
 
         // Developers and admins can message anyone
-        if ($user->hasPermissionLevel(Role::DEVELOPER)) {
+        if ($user->isDeveloper() || $user->isAdmin()) {
             return true;
         }
 
@@ -114,7 +133,7 @@ class ChatMessagePolicy
      */
     public function moderate(User $user): bool
     {
-        return $user->hasRole(Role::ADMIN);
+        return $user->isAdmin() || $user->isDeveloper();
     }
 
     /**
@@ -122,7 +141,7 @@ class ChatMessagePolicy
      */
     public function viewStatistics(User $user): bool
     {
-        return $user->hasPermissionLevel(Role::DEVELOPER);
+        return $user->isDeveloper() || $user->isAdmin();
     }
 
     /**
@@ -130,7 +149,7 @@ class ChatMessagePolicy
      */
     public function export(User $user): bool
     {
-        return $user->hasRole(Role::ADMIN);
+        return $user->isAdmin();
     }
 
     /**
@@ -139,10 +158,10 @@ class ChatMessagePolicy
     public function blockUser(User $user, User $targetUser): bool
     {
         // Users can block others (except their reseller/admin)
-        if ($targetUser->hasPermissionLevel(Role::RESELLER) && $user->hasRole(Role::USER)) {
+        if (($targetUser->isReseller() || $targetUser->isAdmin()) && $user->isUser()) {
             return false; // Users cannot block their reseller or admins
         }
 
-        return $user->hasPermission('chat_access');
+        return true; // All users can block others
     }
 }

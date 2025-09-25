@@ -60,6 +60,7 @@ class License extends Model
     public const STATUS_EXPIRED = 'expired';
     public const STATUS_SUSPENDED = 'suspended';
     public const STATUS_RESET = 'reset';
+    public const STATUS_PENDING = 'pending';
 
     /**
      * Boot the model
@@ -139,6 +140,14 @@ class License extends Model
     public function needsReset(): bool
     {
         return $this->status === self::STATUS_RESET;
+    }
+
+    /**
+     * Check if license is pending
+     */
+    public function isPending(): bool
+    {
+        return $this->status === self::STATUS_PENDING;
     }
 
     /**
@@ -267,5 +276,13 @@ class License extends Model
     public function scopeAssignedTo($query, int $userId)
     {
         return $query->where('user_id', $userId);
+    }
+
+    /**
+     * Scope for pending licenses
+     */
+    public function scopePending($query)
+    {
+        return $query->where('status', self::STATUS_PENDING);
     }
 }
