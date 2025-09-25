@@ -7,6 +7,7 @@ use App\Enums\Role;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -35,10 +36,18 @@ class User extends Authenticatable
         'privacy_policy_accepted_at',
         'developer_notes',
         'reseller_id',
+        'max_users_quota',
+        'max_licenses_quota',
+        'current_users_count',
+        'current_licenses_count',
         'two_factor_secret',
         'two_factor_recovery_codes',
         'two_factor_confirmed_at',
         'oauth_providers',
+        'failed_login_attempts',
+        'locked_until',
+        'last_failed_login_at',
+        'last_failed_login_ip',
     ];
 
     /**
@@ -67,6 +76,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'privacy_policy_accepted_at' => 'datetime',
             'two_factor_confirmed_at' => 'datetime',
+            'locked_until' => 'datetime',
+            'last_failed_login_at' => 'datetime',
             '2fa_enabled' => 'boolean',
             'password' => 'hashed',
             'oauth_providers' => 'json',
@@ -222,6 +233,22 @@ class User extends Authenticatable
     public function backups(): HasMany
     {
         return $this->hasMany(Backup::class, 'created_by');
+    }
+
+    /**
+     * Get user's wallet
+     */
+    public function wallet(): HasOne
+    {
+        return $this->hasOne(UserWallet::class);
+    }
+
+    /**
+     * Get user's transactions
+     */
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(Transaction::class);
     }
 
     /**
@@ -383,5 +410,200 @@ class User extends Authenticatable
         }
 
         return $this->hasOAuthProvider($provider);
+    }
+
+    /**
+     * Check if reseller can add more users
+     */
+    public function canAddUser(): bool
+    {
+        if (!$this->isReseller()) {
+            return false;
+        }
+
+        if (is_null($this->max_users_quota)) {
+            return true; // No quota limit
+        }
+
+        return $this->current_users_count < $this->max_users_quota;
+    }
+
+    /**
+     * Check if reseller can add more licenses
+     */
+    public function canAddLicense(): bool
+    {
+        if (!$this->isReseller()) {
+            return false;
+        }
+
+        if (is_null($this->max_licenses_quota)) {
+            return true; // No quota limit
+        }
+
+        return $this->current_licenses_count < $this->max_licenses_quota;
+    }
+
+    /**
+     * Get remaining user quota
+     */
+    public function getRemainingUserQuota(): ?int
+    {
+        if (!$this->isReseller() || is_null($this->max_users_quota)) {
+            return null;
+        }
+
+        return max(0, $this->max_users_quota - $this->current_users_count);
+    }
+
+    /**
+     * Get remaining license quota
+     */
+    public function getRemainingLicenseQuota(): ?int
+    {
+        if (!$this->isReseller() || is_null($this->max_licenses_quota)) {
+            return null;
+        }
+
+        return max(0, $this->max_licenses_quota - $this->current_licenses_count);
+    }
+
+    /**
+     * Update user count for reseller
+     */
+    public function updateUserCount(): void
+    {
+        if ($this->isReseller()) {
+            $this->update([
+                'current_users_count' => $this->managedUsers()->count()
+            ]);
+        }
+    }
+
+    /**
+     * Update license count for reseller
+     */
+    public function updateLicenseCount(): void
+    {
+        if ($this->isReseller()) {
+            $this->update([
+                'current_licenses_count' => $this->ownedLicenses()->count()
+            ]);
+        }
+    }
+
+    /**
+     * Get quota usage percentage for users
+     */
+    public function getUserQuotaUsagePercentage(): ?float
+    {
+        if (!$this->isReseller() || is_null($this->max_users_quota) || $this->max_users_quota === 0) {
+            return null;
+        }
+
+        return ($this->current_users_count / $this->max_users_quota) * 100;
+    }
+
+    /**
+     * Get quota usage percentage for licenses
+     */
+    public function getLicenseQuotaUsagePercentage(): ?float
+    {
+        if (!$this->isReseller() || is_null($this->max_licenses_quota) || $this->max_licenses_quota === 0) {
+            return null;
+        }
+
+        return ($this->current_licenses_count / $this->max_licenses_quota) * 100;
+    }
+
+    /**
+     * Check if quota is near limit (80% or more)
+     */
+    public function isUserQuotaNearLimit(): bool
+    {
+        $percentage = $this->getUserQuotaUsagePercentage();
+        return $percentage !== null && $percentage >= 80;
+    }
+
+    /**
+     * Check if quota is near limit (80% or more)
+     */
+    public function isLicenseQuotaNearLimit(): bool
+    {
+        $percentage = $this->getLicenseQuotaUsagePercentage();
+        return $percentage !== null && $percentage >= 80;
+    }
+
+    /**
+     * Check if account is currently locked
+     */
+    public function isAccountLocked(): bool
+    {
+        return $this->locked_until && now()->lt($this->locked_until);
+    }
+
+    /**
+     * Get remaining lock time in minutes
+     */
+    public function getRemainingLockTime(): ?int
+    {
+        if (!$this->isAccountLocked()) {
+            return null;
+        }
+
+        return now()->diffInMinutes($this->locked_until);
+    }
+
+    /**
+     * Get email for password reset (required by Laravel's password reset)
+     */
+    public function getEmailForPasswordReset(): string
+    {
+        return $this->email;
+    }
+
+    /**
+     * Check if user can request password reset
+     */
+    public function canRequestPasswordReset(): bool
+    {
+        // OAuth-only users without password cannot reset password
+        if ($this->isOAuthOnly()) {
+            return false;
+        }
+
+        // Locked accounts cannot request password reset
+        if ($this->isAccountLocked()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get formatted lock duration text
+     */
+    public function getLockDurationText(): ?string
+    {
+        $minutes = $this->getRemainingLockTime();
+        
+        if (!$minutes) {
+            return null;
+        }
+
+        if ($minutes < 60) {
+            return $minutes . ' minute' . ($minutes !== 1 ? 's' : '');
+        }
+
+        $hours = intval($minutes / 60);
+        $remainingMinutes = $minutes % 60;
+
+        $text = $hours . ' hour' . ($hours !== 1 ? 's' : '');
+        
+        if ($remainingMinutes > 0) {
+            $text .= ' and ' . $remainingMinutes . ' minute' . ($remainingMinutes !== 1 ? 's' : '');
+        }
+
+        return $text;
     }
 }

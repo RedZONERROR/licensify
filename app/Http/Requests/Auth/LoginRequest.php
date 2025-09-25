@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\User;
+use App\Services\PasswordResetService;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
@@ -11,6 +13,14 @@ use Illuminate\Validation\ValidationException;
 
 class LoginRequest extends FormRequest
 {
+    protected PasswordResetService $passwordResetService;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->passwordResetService = app(PasswordResetService::class);
+    }
+
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -41,12 +51,35 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
+        // Check if user exists and is locked
+        $user = User::where('email', $this->string('email'))->first();
+        
+        if ($user && $this->passwordResetService->isAccountLocked($user)) {
+            $remainingTime = $this->passwordResetService->getRemainingLockTime($user);
+            throw ValidationException::withMessages([
+                'email' => [
+                    'Your account is temporarily locked due to multiple failed login attempts. ' .
+                    'Please try again in ' . $remainingTime . ' minute' . ($remainingTime !== 1 ? 's' : '') . '.'
+                ],
+            ]);
+        }
+
         if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
             RateLimiter::hit($this->throttleKey());
+
+            // Handle failed login attempt for account lockout
+            if ($user) {
+                $this->passwordResetService->handleFailedLogin($user, $this->ip());
+            }
 
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
             ]);
+        }
+
+        // Handle successful login
+        if ($user) {
+            $this->passwordResetService->handleSuccessfulLogin($user);
         }
 
         RateLimiter::clear($this->throttleKey());
